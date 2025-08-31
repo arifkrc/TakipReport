@@ -94,6 +94,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
+  // wire refresh button to reload current screen data
+  const refreshBtn = document.getElementById('refresh');
+  if (refreshBtn) refreshBtn.addEventListener('click', async () => {
+    showToast('Veriler yenileniyor...', 'info');
+    // trigger reload of current screen
+    try { if (currentModule && typeof currentModule.mount === 'function') { await currentModule.mount(content, { setHeader: (t, s) => { headerTitle.textContent = t; headerSub.textContent = s }}); } } catch(e) { console.warn('refresh mount failed', e); }
+  });
+
   // restore last screen from hash or localStorage and load it
   const initial = (location.hash || (localStorage.getItem('lastScreen') ? `#${localStorage.getItem('lastScreen')}` : '#uretim')).replace('#','');
   setActiveNav(initial);

@@ -3,6 +3,9 @@ const { ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+// When switching to realtime data, enable REALTIME_MODE to disable file-based persistence
+const REALTIME_MODE = true;
+
 function createWindow () {
   const win = new BrowserWindow({
     width: 1200,
@@ -32,6 +35,7 @@ app.on('window-all-closed', function () {
 
 // IPC handler to save üretim records to a JSON file in app.getPath('userData')
 ipcMain.handle('save-uretim', async (event, record) => {
+  if (REALTIME_MODE) return { ok: false, error: 'disabled in realtime mode' };
   try {
     const dataDir = app.getPath('userData');
     const file = path.join(dataDir, 'uretim-records.json');
@@ -58,6 +62,7 @@ ipcMain.handle('save-uretim', async (event, record) => {
 
 // IPC handler to list üretim records
 ipcMain.handle('list-uretim', async () => {
+  if (REALTIME_MODE) return { ok: true, records: [] };
   try {
     const dataDir = app.getPath('userData');
     const file = path.join(dataDir, 'uretim-records.json');
@@ -72,6 +77,7 @@ ipcMain.handle('list-uretim', async () => {
 
 // IPC handlers for paketleme (packing) records
 ipcMain.handle('save-paketleme', async (event, record) => {
+  if (REALTIME_MODE) return { ok: false, error: 'disabled in realtime mode' };
   try {
     const dataDir = app.getPath('userData');
     const file = path.join(dataDir, 'paketleme-records.json');
@@ -95,6 +101,7 @@ ipcMain.handle('save-paketleme', async (event, record) => {
 });
 
 ipcMain.handle('list-paketleme', async () => {
+  if (REALTIME_MODE) return { ok: true, records: [] };
   try {
     const dataDir = app.getPath('userData');
     const file = path.join(dataDir, 'paketleme-records.json');
@@ -109,6 +116,7 @@ ipcMain.handle('list-paketleme', async () => {
 
 // IPC handlers for product (urun) records
 ipcMain.handle('save-urun', async (event, record) => {
+  if (REALTIME_MODE) return { ok: false, error: 'disabled in realtime mode' };
   try {
     const dataDir = app.getPath('userData');
     const file = path.join(dataDir, 'urun-records.json');
@@ -130,6 +138,7 @@ ipcMain.handle('save-urun', async (event, record) => {
 });
 
 ipcMain.handle('list-urun', async () => {
+  if (REALTIME_MODE) return { ok: true, records: [] };
   try {
     const dataDir = app.getPath('userData');
     const file = path.join(dataDir, 'urun-records.json');
@@ -144,6 +153,7 @@ ipcMain.handle('list-urun', async () => {
 
 // IPC handlers for operasyon (operations) records
 ipcMain.handle('save-operasyon', async (event, record) => {
+  if (REALTIME_MODE) return { ok: false, error: 'disabled in realtime mode' };
   try {
     const dataDir = app.getPath('userData');
     const file = path.join(dataDir, 'operasyon-records.json');
@@ -165,6 +175,7 @@ ipcMain.handle('save-operasyon', async (event, record) => {
 });
 
 ipcMain.handle('list-operasyon', async () => {
+  if (REALTIME_MODE) return { ok: true, records: [] };
   try {
     const dataDir = app.getPath('userData');
     const file = path.join(dataDir, 'operasyon-records.json');
@@ -179,6 +190,7 @@ ipcMain.handle('list-operasyon', async () => {
 
 // IPC handlers for siparis (orders)
 ipcMain.handle('save-siparis', async (event, record) => {
+  if (REALTIME_MODE) return { ok: false, error: 'disabled in realtime mode' };
   try {
     const dataDir = app.getPath('userData');
     const file = path.join(dataDir, 'siparis-records.json');
@@ -200,6 +212,7 @@ ipcMain.handle('save-siparis', async (event, record) => {
 });
 
 ipcMain.handle('list-siparis', async () => {
+  if (REALTIME_MODE) return { ok: true, records: [] };
   try {
     const dataDir = app.getPath('userData');
     const file = path.join(dataDir, 'siparis-records.json');
@@ -214,6 +227,7 @@ ipcMain.handle('list-siparis', async () => {
 
 // import-siparis: open dialog, parse .csv and .xlsx files and append rows to siparis-records.json
 ipcMain.handle('import-siparis', async (event, filePathsArg) => {
+  if (REALTIME_MODE) return { ok: false, error: 'disabled in realtime mode' };
   try {
     let filePaths = filePathsArg;
     if (!filePaths || !Array.isArray(filePaths) || filePaths.length === 0) {
@@ -302,6 +316,7 @@ ipcMain.handle('import-siparis', async (event, filePathsArg) => {
 
 // preview-siparis: open dialog, parse .csv and .xlsx files but DO NOT save; return parsed rows and filePaths (limit to first 20 rows)
 ipcMain.handle('preview-siparis', async () => {
+  if (REALTIME_MODE) return { ok: false, error: 'disabled in realtime mode' };
   try {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: 'Dosya seç (CSV veya XLSX)',
@@ -387,6 +402,7 @@ const tryDeleteByFile = (filePath, savedAt) => {
 };
 
 ipcMain.handle('delete-uretim', async (event, savedAt) => {
+  if (REALTIME_MODE) return { ok: false, error: 'disabled in realtime mode' };
   try {
     const file = path.join(app.getPath('userData'), 'uretim-records.json');
     return tryDeleteByFile(file, savedAt);
@@ -394,6 +410,7 @@ ipcMain.handle('delete-uretim', async (event, savedAt) => {
 });
 
 ipcMain.handle('delete-paketleme', async (event, savedAt) => {
+  if (REALTIME_MODE) return { ok: false, error: 'disabled in realtime mode' };
   try {
     const file = path.join(app.getPath('userData'), 'paketleme-records.json');
     return tryDeleteByFile(file, savedAt);
@@ -401,6 +418,7 @@ ipcMain.handle('delete-paketleme', async (event, savedAt) => {
 });
 
 ipcMain.handle('delete-urun', async (event, savedAt) => {
+  if (REALTIME_MODE) return { ok: false, error: 'disabled in realtime mode' };
   try {
     const file = path.join(app.getPath('userData'), 'urun-records.json');
     return tryDeleteByFile(file, savedAt);
@@ -408,6 +426,7 @@ ipcMain.handle('delete-urun', async (event, savedAt) => {
 });
 
 ipcMain.handle('delete-operasyon', async (event, savedAt) => {
+  if (REALTIME_MODE) return { ok: false, error: 'disabled in realtime mode' };
   try {
     const file = path.join(app.getPath('userData'), 'operasyon-records.json');
     return tryDeleteByFile(file, savedAt);
@@ -415,6 +434,7 @@ ipcMain.handle('delete-operasyon', async (event, savedAt) => {
 });
 
 ipcMain.handle('delete-siparis', async (event, savedAt) => {
+  if (REALTIME_MODE) return { ok: false, error: 'disabled in realtime mode' };
   try {
     const file = path.join(app.getPath('userData'), 'siparis-records.json');
     return tryDeleteByFile(file, savedAt);

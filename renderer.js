@@ -187,35 +187,11 @@ const screens = {
     title: 'Üretim - Paket Farkı',
     sub: 'Üretim ile paketleme arasındaki farklar',
     render: () => {
-      const rows = [
-        { hat: 'Hat 1', uretim: 4000, paket: 3900 },
-        { hat: 'Hat 2', uretim: 3800, paket: 3600 },
-        { hat: 'Hat 3', uretim: 3650, paket: 3740 }
-      ];
       return `
         <div class="p-4 bg-neutral-800 rounded-lg">
-          <table class="w-full">
-            <thead class="text-neutral-400 text-sm">
-              <tr>
-                <th class="p-2">Hat</th>
-                <th class="p-2">Üretim</th>
-                <th class="p-2">Paket</th>
-                <th class="p-2">Fark</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map(r => `
-                <tr class="border-t border-neutral-800">
-                  <td class="p-2">${r.hat}</td>
-                  <td class="p-2">${r.uretim}</td>
-                  <td class="p-2">${r.paket}</td>
-                  <td class="p-2">${r.uretim - r.paket}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
+          <div class="text-neutral-400">Veri bekleniyor — gerçek zamanlı üretim vs. paketleme farkları burada görünecek.</div>
         </div>
-      `
+      `;
     }
   },
 
@@ -223,36 +199,11 @@ const screens = {
     title: 'Siparişler',
     sub: 'Açık siparişler ve durumları',
     render: () => {
-      const orders = [
-        { id: 'S-1001', qty: 1200, due: '2025-09-02', status: 'Hazırlanıyor' },
-        { id: 'S-1002', qty: 500, due: '2025-09-05', status: 'Tamamlandı' },
-        { id: 'S-1003', qty: 2000, due: '2025-09-10', status: 'Beklemede' }
-      ];
-
       return `
         <div class="p-4 bg-neutral-800 rounded-lg">
-          <table class="w-full">
-            <thead class="text-neutral-400 text-sm">
-              <tr>
-                <th class="p-2">Sipariş</th>
-                <th class="p-2">Adet</th>
-                <th class="p-2">Teslim</th>
-                <th class="p-2">Durum</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${orders.map(o => `
-                <tr class="border-t border-neutral-800">
-                  <td class="p-2">${o.id}</td>
-                  <td class="p-2">${o.qty}</td>
-                  <td class="p-2">${o.due}</td>
-                  <td class="p-2">${o.status}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
+          <div class="text-neutral-400">Veri bekleniyor — sipariş bilgileri gerçek zamanlı olarak yüklendiğinde burada görünecek.</div>
         </div>
-      `
+      `;
     }
   }
 }

@@ -14,12 +14,7 @@ export async function mount(container, { setHeader }) {
 
   const controls = container.querySelector('#farki-controls');
   const tableWrap = container.querySelector('#farki-table');
-  // summary charts container
-  const chartsWrap = document.createElement('div'); chartsWrap.className = 'mb-4 grid grid-cols-2 gap-4';
-  const pieWrap = document.createElement('div'); pieWrap.className = 'bg-neutral-800 p-3 rounded'; pieWrap.innerHTML = '<h4 class="text-sm mb-2">Fark Dağılımı (Top 10)</h4>';
-  const barWrap = document.createElement('div'); barWrap.className = 'bg-neutral-800 p-3 rounded'; barWrap.innerHTML = '<h4 class="text-sm mb-2">Top Ürünler (Fark)</h4>';
-  chartsWrap.appendChild(pieWrap); chartsWrap.appendChild(barWrap);
-  controls.parentNode.insertBefore(chartsWrap, controls.nextSibling);
+  // charts removed — list-only summary
 
   const { wrapper: selectorWrap, select } = createRowCountSelector(20);
   const searchWrap = document.createElement('div');
@@ -70,16 +65,7 @@ export async function mount(container, { setHeader }) {
         return { urunKodu, tarih, uAdet, pAdet, fark: uAdet - pAdet };
       }).sort((a,b) => b.fark - a.fark);
 
-      // prepare simple charts: top 10 absolute differences
-      try {
-        const sortedByAbs = rows.slice().sort((a,b)=> Math.abs(b.fark) - Math.abs(a.fark)).slice(0,10);
-        const labels = sortedByAbs.map(r=> r.urunKodu + (r.tarih ? ' '+r.tarih : ''));
-        const data = sortedByAbs.map(r=> r.fark);
-        // lazy import helper
-        const { renderChart } = await import('../ui/helpers.js');
-        renderChart(pieWrap, { type: 'pie', data: { labels, datasets: [{ data, backgroundColor: labels.map((_,i)=>['#60a5fa','#f472b6','#34d399','#f59e0b','#a78bfa'][i%5]) }] }, options: { responsive:true, plugins:{legend:{position:'right'}} } });
-        renderChart(barWrap, { type: 'bar', data: { labels, datasets: [{ label: 'Fark', data, backgroundColor: '#60a5fa' }] }, options: { responsive:true, scales:{y:{beginAtZero:true}} } });
-      } catch (e) { /* non-critical */ }
+  // charts removed
 
   const q = (searchInput && searchInput.value || '').trim().toLowerCase();
   const filtered = q ? rows.filter(r => {

@@ -1,5 +1,8 @@
 import { showToast, createRowCountSelector, createPaginationControls, exportToCSV, exportToXLSX, printTable } from '../ui/helpers.js';
 
+// module-scoped debounce timer so we can clear it on unmount
+let _uretim_reload_timer = null;
+
 export async function mount(container, { setHeader }) {
   setHeader('Üretim', 'Rapor görünümü (sekmeler)');
   container.innerHTML = `
@@ -45,15 +48,55 @@ export async function mount(container, { setHeader }) {
   }
   tabButtons.forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
   showTab('tab-list');
-    const chartsWrap = document.createElement('div'); chartsWrap.className = 'mb-4 grid grid-cols-1 gap-4';
-    const barWrap = document.createElement('div'); barWrap.className = 'bg-neutral-800 p-3 rounded'; barWrap.innerHTML = '<h4 class="text-sm mb-2">Top Ürünler</h4>';
-    listPlaceholder.parentNode.insertBefore(chartsWrap, listPlaceholder);
-    chartsWrap.appendChild(barWrap);
+    // charts removed — list-only view
+    // date range controls
+    const controlsWrap = document.createElement('div'); controlsWrap.className = 'flex items-center gap-2 mb-3';
+    // leave date inputs empty by default; backend will use its default current-month range
+    controlsWrap.innerHTML = `
+      <label class="text-sm flex items-center gap-2">From <input id="utf-from" type="date" class="px-2 py-1 rounded bg-neutral-800 text-neutral-200" value=""/></label>
+      <label class="text-sm flex items-center gap-2">To <input id="utf-to" type="date" class="px-2 py-1 rounded bg-neutral-800 text-neutral-200" value=""/></label>
+      <label class="text-sm flex items-center gap-2"><input id="utf-onlyactive" type="checkbox" class="rounded" checked/> Sadece Aktif</label>
+      <button id="utf-refresh" class="px-3 py-1 bg-neutral-800 rounded">Yenile</button>
+    `;
+  listPlaceholder.parentNode.insertBefore(controlsWrap, listPlaceholder);
+    // auto reload when range or active flag changes (debounced)
+    const fromInput = listPlaceholder.parentNode.querySelector('#utf-from');
+    const toInput = listPlaceholder.parentNode.querySelector('#utf-to');
+    const onlyActiveCheckbox = listPlaceholder.parentNode.querySelector('#utf-onlyactive');
+    _uretim_reload_timer = null;
+    const debounceReload = () => {
+      if (_uretim_reload_timer) clearTimeout(_uretim_reload_timer);
+      _uretim_reload_timer = setTimeout(() => { currentPage = 1; loadList(); _uretim_reload_timer = null; }, 500);
+    };
+    if (fromInput) fromInput.addEventListener('change', () => { debounceReload(); });
+    if (toInput) toInput.addEventListener('change', () => { debounceReload(); });
+    if (onlyActiveCheckbox) onlyActiveCheckbox.addEventListener('change', () => { debounceReload(); });
 
   async function loadList() {
-    const res = await window.electronAPI.listUretim();
-    if (!res || !res.ok) { listPlaceholder.innerHTML = '<div class="text-rose-400">Liste yüklenemedi</div>'; return; }
-    const records = res.records || [];
+    // read controls
+    const fromVal = listPlaceholder.parentNode.querySelector('#utf-from').value;
+    const toVal = listPlaceholder.parentNode.querySelector('#utf-to').value;
+    const onlyActive = !!listPlaceholder.parentNode.querySelector('#utf-onlyactive').checked;
+    let res;
+    try {
+      if (window.api && window.api.listUtf) {
+        const opts = { onlyActive };
+        if (fromVal) {
+          try { opts.from = new Date(fromVal + 'T00:00:00').toISOString(); } catch (e) { opts.from = fromVal; }
+        }
+        if (toVal) {
+          try { opts.to = new Date(toVal + 'T23:59:59').toISOString(); } catch (e) { opts.to = toVal; }
+        }
+        res = await window.api.listUtf(opts);
+      } else res = await window.electronAPI.listUretim();
+    } catch (e) { listPlaceholder.innerHTML = '<div class="text-rose-400">Liste yüklenemedi</div>'; return; }
+    const records = Array.isArray(res) ? res : (res && (res.records || res.data) ? (res.records || res.data) : []);
+
+    // fetch operation lookup and product lookup to show names
+    const operationMap = {};
+    try { const opRes = window.api && window.api.listOperationTypes ? await window.api.listOperationTypes({ onlyActive: false }) : await window.electronAPI.listOperasyon(); const opRecs = Array.isArray(opRes) ? opRes : (opRes && opRes.records ? opRes.records : []); for (const o of (opRecs||[])) { const id = o.id || o.operationTypeId || o._id; if (id != null) operationMap[id] = o; } } catch(e) {}
+    const productMap = {};
+    try { const pRes = window.api && window.api.listProducts ? await window.api.listProducts({ onlyActive: false }) : await window.electronAPI.listUrun(); const pRecs = Array.isArray(pRes) ? pRes : (pRes && pRes.records ? pRes.records : []); for (const p of (pRecs||[])) { const id = p.id || p.productId || p._id; if (id != null) productMap[id] = p; } } catch(e) {}
 
     const { wrapper: selectorWrap, select } = createRowCountSelector(20);
     const searchWrap = document.createElement('div');
@@ -154,50 +197,43 @@ export async function mount(container, { setHeader }) {
         <div class="overflow-auto bg-neutral-800 p-2 rounded">
           <table class="w-full text-left text-sm">
             <thead class="text-neutral-400">
-              <tr>
-                <th class="p-2">Tarih</th>
-                <th class="p-2">Vardiya</th>
-                <th class="p-2">Üstabaşı</th>
-                <th class="p-2">Bölüm</th>
-                <th class="p-2">Operator</th>
-                <th class="p-2">Ürün Kodu</th>
-                <th class="p-2">Üretim Adedi</th>
-                <th class="p-2">Başlangıç</th>
-                <th class="p-2">Bitiş</th>
-                <th class="p-2">Döküm</th>
-                <th class="p-2">Operatör Hata</th>
-                <th class="p-2">Tezgah Arıza</th>
-                <th class="p-2">Tezgah Ayar</th>
-                <th class="p-2">Elmas</th>
-                <th class="p-2">Parça Bekleme</th>
-                <th class="p-2">Temizlik</th>
-                <th class="p-2">Mola</th>
-                <th class="p-2">Kaydedildi</th>
-              </tr>
+                      <tr>
+                        <th class="p-2">Tarih</th>
+                        <th class="p-2">Operasyon</th>
+                        <th class="p-2">Sorumlu</th>
+                        <th class="p-2">Vardiya</th>
+                        <th class="p-2">Hat</th>
+                        <th class="p-2">Makine No</th>
+                        <th class="p-2">Operatör</th>
+                        <th class="p-2">Bölüm Sorumlusu</th>
+                        <th class="p-2">Ürün Kodu</th>
+                        <th class="p-2">Ürün Açıklama</th>
+                        <th class="p-2">Üretim Adedi</th>
+                        <th class="p-2">Döküm</th>
+                        <th class="p-2">Operatör Hata</th>
+                        <th class="p-2">Makine Arıza</th>
+                        <th class="p-2">Makine Ayar</th>
+                        <th class="p-2">Elmas</th>
+                        <th class="p-2">Parça Bekleme</th>
+                        <th class="p-2">Temizlik</th>
+                        <th class="p-2">Başlangıç</th>
+                        <th class="p-2">Bitiş</th>
+                        <th class="p-2">Çalışma Süresi</th>
+                        <th class="p-2">Operatör Verim (%)</th>
+                        <th class="p-2">Makine Verim (%)</th>
+                        <th class="p-2">Kaydedilme Zamanı</th>
+                      </tr>
             </thead>
             <tbody>
-              ${slice.map(r => `
-                <tr class="border-t border-neutral-700">
-                  <td class="p-2">${r.tarih || ''}</td>
-                  <td class="p-2">${r.vardiya || ''}</td>
-                  <td class="p-2">${r.ustabasi || ''}</td>
-                  <td class="p-2">${r.bolum || ''}</td>
-                  <td class="p-2">${r.operator || ''}</td>
-                  <td class="p-2">${r.urunKodu || ''}</td>
-                  <td class="p-2">${r.uretimAdedi || ''}</td>
-                  <td class="p-2">${r.baslangic || ''}</td>
-                  <td class="p-2">${r.bitis || ''}</td>
-                  <td class="p-2">${r.dokumHatasi || ''}</td>
-                  <td class="p-2">${r.operatorHatasi || ''}</td>
-                  <td class="p-2">${r.tezgahArizasi || ''}</td>
-                  <td class="p-2">${r.tezgahAyari || ''}</td>
-                  <td class="p-2">${r.elmasDegisimi || ''}</td>
-                  <td class="p-2">${r.parcaBekleme || ''}</td>
-                  <td class="p-2">${r.temizlik || ''}</td>
-                  <td class="p-2">${r.mola || ''}</td>
-                  <td class="p-2 text-neutral-400">${r.savedAt ? new Date(r.savedAt).toLocaleString() : ''}</td>
-                </tr>
-              `).join('')}
+                      ${slice.map(r => {
+                        const op = r.operationTypeId && operationMap[r.operationTypeId] ? operationMap[r.operationTypeId] : (r.operationCode ? { code: r.operationCode, name: r.operationName } : {});
+                        const prod = r.productId && productMap[r.productId] ? productMap[r.productId] : { code: r.productCode || r.urunKodu || '', description: r.productDescription || r.urunAciklamasi || '' };
+                        const workStart = r.workStart || r.workStartTime || r.baslangic || r.start;
+                        const workEnd = r.workEnd || r.workEndTime || r.bitis || r.end;
+                        let duration = '';
+                        try { if (workStart && workEnd) { const d = (new Date(workEnd) - new Date(workStart)) / 1000; const h = Math.floor(d/3600); const m = Math.floor((d%3600)/60); duration = `${h}h ${m}m`; } } catch(e) {}
+                        return `\n                <tr class="border-t border-neutral-700">\n                  <td class="p-2">${r.date || r.tarih || ''}</td>\n                  <td class="p-2">${op.code || op.operationCode || ''} ${op.name || op.operationName || ''}</td>\n                  <td class="p-2">${r.supervisor || ''}</td>\n                  <td class="p-2">${r.shift || r.vardiya || ''}</td>\n                  <td class="p-2">${r.lineNumber || ''}</td>\n                  <td class="p-2">${r.machineNumber || ''}</td>\n                  <td class="p-2">${r.operator || ''}</td>\n                  <td class="p-2">${r.departmentSupervisor || ''}</td>\n                  <td class="p-2">${prod.code || ''}</td>\n                  <td class="p-2">${prod.description || ''}</td>\n                  <td class="p-2">${r.productionQuantity || ''}</td>\n                  <td class="p-2">${r.castingError || ''}</td>\n                  <td class="p-2">${r.operatorError || ''}</td>\n                  <td class="p-2">${r.machineFailure || ''}</td>\n                  <td class="p-2">${r.machineAdjustment || ''}</td>\n                  <td class="p-2">${r.diamondChange || ''}</td>\n                  <td class="p-2">${r.partWaiting || ''}</td>\n                  <td class="p-2">${r.cleaning || ''}</td>\n+                  <td class="p-2">${workStart || ''}</td>\n+                  <td class="p-2">${workEnd || ''}</td>\n+                  <td class="p-2">${duration}</td>\n+                  <td class="p-2">${r.operatorEfficiency != null ? r.operatorEfficiency : r.operatorVerimliligi || ''}</td>\n+                  <td class="p-2">${r.machineEfficiency != null ? r.machineEfficiency : r.tezgahVerimliligi || ''}</td>\n+                  <td class="p-2 text-neutral-400">${r.savedAt ? new Date(r.savedAt).toLocaleString() : ''}</td>\n                </tr>`;
+                      }).join('')}
             </tbody>
           </table>
         </div>
@@ -223,7 +259,7 @@ export async function mount(container, { setHeader }) {
       } catch (e) { /* ignore chart errors */ }
     };
 
-    // wire export/print actions
+  // wire export/print actions
     setTimeout(() => {
       const csvBtn = topRow.querySelector('#export-csv');
       const xlsxBtn = topRow.querySelector('#export-xlsx');
@@ -243,7 +279,11 @@ export async function mount(container, { setHeader }) {
       ]); } catch (e) { showToast('Yazdırma başarısız'); } });
     }, 80);
 
-    pager.update(records.length, pageSize, currentPage);
+  // wire refresh button
+  const refreshBtn = listPlaceholder.parentNode.querySelector('#utf-refresh');
+  refreshBtn && refreshBtn.addEventListener('click', () => { currentPage = 1; loadList(); });
+
+  pager.update(records.length, pageSize, currentPage);
     renderTable();
     select.addEventListener('change', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); });
     if (searchInput) searchInput.addEventListener('input', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); });
@@ -253,5 +293,6 @@ export async function mount(container, { setHeader }) {
 }
 
 export async function unmount(container) {
-  try { container.innerHTML = ''; } catch (e) {}
+  try { if (_uretim_reload_timer) { clearTimeout(_uretim_reload_timer); _uretim_reload_timer = null; } container.innerHTML = ''; } catch (e) {}
 }
+

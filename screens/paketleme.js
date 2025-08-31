@@ -10,17 +10,50 @@ export async function mount(container, { setHeader }) {
   `;
 
   const placeholder = container.querySelector('#paketleme-list-placeholder');
-  // charts summary area: top products bar + customers pie
-  const chartsWrap = document.createElement('div'); chartsWrap.className = 'mb-4 grid grid-cols-2 gap-4';
-  const prodBar = document.createElement('div'); prodBar.className = 'bg-neutral-800 p-3 rounded'; prodBar.innerHTML = '<h4 class="text-sm mb-2">Top Ürünler</h4>';
-  const custPie = document.createElement('div'); custPie.className = 'bg-neutral-800 p-3 rounded'; custPie.innerHTML = '<h4 class="text-sm mb-2">Müşteri Dağılımı</h4>';
-  placeholder.parentNode.insertBefore(chartsWrap, placeholder);
-  chartsWrap.appendChild(prodBar); chartsWrap.appendChild(custPie);
+  // charts removed for Paketleme view (list-only)
 
   async function loadList() {
-    const res = await window.electronAPI.listPaketleme();
+    let res;
+    if (window.api && typeof window.api.listPacking === 'function') {
+      res = await window.api.listPacking({ onlyActive: true });
+    } else {
+      res = await window.electronAPI.listPaketleme();
+    }
     if (!res || !res.ok) { placeholder.innerHTML = '<div class="text-rose-400">Liste yüklenemedi</div>'; return; }
-    const records = res.records || [];
+    let records = res.records || [];
+
+    // try to resolve product codes/descriptions and order document numbers via batch fetch
+    const productMap = {};
+    const orderMap = {};
+    try {
+      if (window.api && typeof window.api.listProducts === 'function') {
+        const p = await window.api.listProducts();
+        if (p && p.ok && Array.isArray(p.records)) p.records.forEach(pp => { productMap[pp.id || pp.productId || pp.productId] = pp; productMap[pp.productId || pp.id || pp.productId] = pp; });
+      }
+      if (window.api && typeof window.api.listSiparis === 'function') {
+        const o = await window.api.listSiparis();
+        if (o && o.ok && Array.isArray(o.records)) o.records.forEach(or => { orderMap[or.id || or.orderId || or.id] = or; orderMap[or.orderId || or.id || or.orderId] = or; });
+      }
+    } catch (e) { /* swallow product/order fetch errors */ }
+
+    // map packing records to display fields
+    records = records.map(r => {
+      const prod = productMap[r.productId] || productMap[r.productId] || null;
+      const ord = orderMap[r.orderId] || orderMap[r.orderId] || null;
+      return Object.assign({}, r, {
+        urunKodu: (prod && (prod.productCode || prod.productCode)) || r.productCode || '',
+        urunAciklamasi: (prod && (prod.description || prod.description)) || r.productDescription || '',
+        paketAciklama: r.packageDescription || r.paketAciklama || '',
+        musteri: r.customer || r.musteri || '',
+        miktar: r.quantity || r.miktar || 0,
+        tarih: r.date ? new Date(r.date).toLocaleString() : (r.tarih || ''),
+        vardiya: r.shift || r.vardiya || '',
+        sorumlu: r.supervisor || r.sorumlu || '',
+        siparisNo: ord ? (ord.documentNumber || ord.documentNo || ord.DocumentNumber) : (r.orderDocumentNumber || ''),
+        savedAt: r.updatedAt || r.createdAt || r.savedAt || null,
+        _raw: r
+      });
+    });
 
     const { wrapper: selectorWrap, select } = createRowCountSelector(20);
     const searchWrap = document.createElement('div');
@@ -57,34 +90,28 @@ export async function mount(container, { setHeader }) {
           <table class="w-full text-left text-sm">
             <thead class="text-neutral-400">
               <tr>
-                <th class="p-2">Tarih</th>
-                <th class="p-2">Vardiya</th>
-                <th class="p-2">Üstabaşı</th>
                 <th class="p-2">Ürün Kodu</th>
-                <th class="p-2">Açıklama</th>
+                <th class="p-2">Ürün Açıklaması</th>
+                <th class="p-2">Paket Açıklaması</th>
                 <th class="p-2">Müşteri</th>
-                <th class="p-2">Adet</th>
-                <th class="p-2">Fire</th>
-                <th class="p-2">Patlatılan Kutu</th>
-                <th class="p-2">Patlatılan Firma</th>
-                <th class="p-2">Hazırlanan Firma</th>
+                <th class="p-2">Miktar</th>
+                <th class="p-2">Tarih ve Saat</th>
+                <th class="p-2">Vardiya</th>
+                <th class="p-2">Sorumlu</th>
                 <th class="p-2">Kaydedildi</th>
               </tr>
             </thead>
             <tbody>
               ${slice.map(r => `
                 <tr class="border-t border-neutral-700">
+                  <td class="p-2">${r.urunKodu || ''}</td>
+                  <td class="p-2">${r.urunAciklamasi || ''}</td>
+                  <td class="p-2">${r.paketAciklama || ''}</td>
+                  <td class="p-2">${r.musteri || ''}</td>
+                  <td class="p-2">${r.miktar || ''}</td>
                   <td class="p-2">${r.tarih || ''}</td>
                   <td class="p-2">${r.vardiya || ''}</td>
-                  <td class="p-2">${r.ustabasi || ''}</td>
-                  <td class="p-2">${r.urunKodu || ''}</td>
-                  <td class="p-2">${r.aciklama || ''}</td>
-                  <td class="p-2">${r.musteri || ''}</td>
-                  <td class="p-2">${r.adet || ''}</td>
-                  <td class="p-2">${r.fire || ''}</td>
-                  <td class="p-2">${r.patlatilanKutu || ''}</td>
-                  <td class="p-2">${r.patlatilanFirma || ''}</td>
-                  <td class="p-2">${r.hazirlananFirma || ''}</td>
+                  <td class="p-2">${r.sorumlu || ''}</td>
                   <td class="p-2 text-neutral-400">${r.savedAt ? new Date(r.savedAt).toLocaleString() : ''}</td>
                 </tr>
               `).join('')}
@@ -98,24 +125,7 @@ export async function mount(container, { setHeader }) {
       if (existingTable) existingTable.outerHTML = html; else placeholder.insertAdjacentHTML('beforeend', html);
     };
 
-    // update charts
-    const updateCharts = async () => {
-      try {
-        const prodAgg = {};
-        const custAgg = {};
-        for (const r of records) {
-          prodAgg[r.urunKodu || ''] = (prodAgg[r.urunKodu || ''] || 0) + (Number(r.adet) || 0);
-          custAgg[r.musteri || ''] = (custAgg[r.musteri || ''] || 0) + (Number(r.adet) || 0);
-        }
-        const prodPairs = Object.entries(prodAgg).sort((a,b)=> b[1]-a[1]).slice(0,10);
-        const prodLabels = prodPairs.map(p=>p[0]); const prodData = prodPairs.map(p=>p[1]);
-        const custPairs = Object.entries(custAgg).sort((a,b)=> b[1]-a[1]).slice(0,10);
-        const custLabels = custPairs.map(p=>p[0]); const custData = custPairs.map(p=>p[1]);
-        const { renderChart } = await import('../ui/helpers.js');
-        renderChart(prodBar, { type:'bar', data:{ labels: prodLabels, datasets:[{ label:'Adet', data: prodData, backgroundColor:'#60a5fa' }] }, options:{responsive:true, scales:{y:{beginAtZero:true}}} });
-        renderChart(custPie, { type:'pie', data:{ labels: custLabels, datasets:[{ data: custData, backgroundColor: custLabels.map((_,i)=>['#60a5fa','#f472b6','#34d399','#f59e0b','#a78bfa'][i%5]) }] }, options:{responsive:true, plugins:{legend:{position:'right'}}} });
-      } catch(e){}
-    };
+  // charts intentionally removed; no-op
 
     setTimeout(() => {
       const csvBtn = topRow.querySelector('#export-csv');
@@ -128,9 +138,9 @@ export async function mount(container, { setHeader }) {
 
   pager.update(records.length, pageSize, currentPage);
   renderTable();
-  try { updateCharts(); } catch(e){}
-  select.addEventListener('change', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); try { updateCharts(); } catch(e){} });
-  if (searchInput) searchInput.addEventListener('input', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); try { updateCharts(); } catch(e){} });
+  // charts removed
+  select.addEventListener('change', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); });
+  if (searchInput) searchInput.addEventListener('input', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); });
   }
 
   await loadList();

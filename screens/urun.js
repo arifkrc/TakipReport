@@ -10,15 +10,28 @@ export async function mount(container, { setHeader }) {
   `;
 
   const placeholder = container.querySelector('#urun-list-placeholder');
-  // charts summary area
-  const chartsWrap = document.createElement('div'); chartsWrap.className = 'mb-4 grid grid-cols-2 gap-4';
-  const prodBar = document.createElement('div'); prodBar.className = 'bg-neutral-800 p-3 rounded'; prodBar.innerHTML = '<h4 class="text-sm mb-2">Top Ürünler</h4>';
-  const typePie = document.createElement('div'); typePie.className = 'bg-neutral-800 p-3 rounded'; typePie.innerHTML = '<h4 class="text-sm mb-2">Tür Dağılımı</h4>';
-  placeholder.parentNode.insertBefore(chartsWrap, placeholder);
-  chartsWrap.appendChild(prodBar); chartsWrap.appendChild(typePie);
+  // charts removed for Ürünler view (list-only)
 
   async function loadList() {
-    const res = await window.electronAPI.listUrun();
+    // prefer realtime API if available
+    let res;
+    if (window.api && typeof window.api.listProducts === 'function') {
+      res = await window.api.listProducts();
+      // map API product fields to internal names used by the table
+      if (res && res.ok && Array.isArray(res.records)) {
+        res.records = res.records.map(p => ({
+          urunKodu: p.productCode || p.kod || '',
+          urunAciklamasi: p.description || p.urunAciklamasi || '',
+          urunTipi: p.type || p.urunTipi || '',
+          aktif: (typeof p.isActive === 'boolean') ? p.isActive : (p.aktif || false),
+          savedAt: p.updatedAt || p.createdAt || p.savedAt || null,
+          // preserve original object for exports if needed
+          _raw: p
+        }));
+      }
+    } else {
+      res = await window.electronAPI.listUrun();
+    }
     if (!res || !res.ok) { placeholder.innerHTML = '<div class="text-rose-400">Liste yüklenemedi</div>'; return; }
     const records = res.records || [];
 
@@ -35,8 +48,11 @@ export async function mount(container, { setHeader }) {
   topRow.appendChild(tools);
     placeholder.appendChild(topRow);
 
-    let pageSize = (select.value === 'all') ? records.length || 1 : Number(select.value || 20);
-    let currentPage = 1;
+  let pageSize = (select.value === 'all') ? records.length || 1 : Number(select.value || 20);
+  let currentPage = 1;
+  // sorting state
+  let sortKey = null; // e.g. 'urunKodu'
+  let sortDir = 'asc'; // 'asc' or 'desc'
     const pager = createPaginationControls(records.length, pageSize, currentPage, (p) => { currentPage = p; renderTable(); });
     placeholder.appendChild(pager);
     const debugInfo = document.createElement('div'); debugInfo.className = 'text-sm text-neutral-400 mt-1'; placeholder.appendChild(debugInfo);
@@ -48,8 +64,30 @@ export async function mount(container, { setHeader }) {
       const filtered = q ? records.filter(r => {
         return ['urunKodu','urunAciklamasi','urunTipi'].some(k => String(r[k] || '').toLowerCase().includes(q));
       }) : records;
+      // apply sorting
+      const sorted = (() => {
+        if (!sortKey) return filtered;
+        const copy = filtered.slice();
+        copy.sort((a,b) => {
+          const va = (a && a[sortKey] != null) ? a[sortKey] : '';
+          const vb = (b && b[sortKey] != null) ? b[sortKey] : '';
+          // booleans
+          if (typeof va === 'boolean' || typeof vb === 'boolean') {
+            const na = va ? 1 : 0; const nb = vb ? 1 : 0; return (na - nb) * (sortDir === 'asc' ? 1 : -1);
+          }
+          // numbers
+          const na = Number(va); const nb = Number(vb);
+          if (!Number.isNaN(na) && !Number.isNaN(nb)) return (na - nb) * (sortDir === 'asc' ? 1 : -1);
+          // dates
+          const da = Date.parse(String(va)); const db = Date.parse(String(vb));
+          if (!Number.isNaN(da) && !Number.isNaN(db)) return (da - db) * (sortDir === 'asc' ? 1 : -1);
+          // fallback string compare
+          return String(va).localeCompare(String(vb), undefined, { sensitivity: 'base' }) * (sortDir === 'asc' ? 1 : -1);
+        });
+        return copy;
+      })();
       const start = (currentPage - 1) * pageSize;
-      const slice = (limit === 'all') ? filtered : filtered.slice(start, start + pageSize);
+      const slice = (limit === 'all') ? sorted : sorted.slice(start, start + pageSize);
 
       const html = `
       <div class="mt-4">
@@ -57,11 +95,11 @@ export async function mount(container, { setHeader }) {
           <table class="w-full text-left text-sm">
             <thead class="text-neutral-400">
               <tr>
-                <th class="p-2">Ürün Kodu</th>
-                <th class="p-2">Açıklama</th>
-                <th class="p-2">Tipi</th>
-                <th class="p-2">Aktif</th>
-                <th class="p-2">Kaydedildi</th>
+                <th class="p-2" data-key="urunKodu">Ürün Kodu</th>
+                <th class="p-2" data-key="urunAciklamasi">Açıklama</th>
+                <th class="p-2" data-key="urunTipi">Tipi</th>
+                <th class="p-2" data-key="aktif">Aktif</th>
+                <th class="p-2" data-key="savedAt">Kaydedildi</th>
               </tr>
             </thead>
             <tbody>
@@ -82,25 +120,24 @@ export async function mount(container, { setHeader }) {
 
       const existingTable = placeholder.querySelector('.mt-4');
       if (existingTable) existingTable.outerHTML = html; else placeholder.insertAdjacentHTML('beforeend', html);
+      // attach sort handlers and update indicators
+      const headerCells = placeholder.querySelectorAll('th[data-key]');
+      headerCells.forEach(h => {
+        const key = h.getAttribute('data-key');
+        h.style.cursor = 'pointer';
+        // set indicator
+        const indicator = (sortKey === key) ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+        h.textContent = h.textContent.replace(/\s*[▲▼]\s*$/, '') + indicator;
+        h.onclick = () => {
+          if (sortKey !== key) { sortKey = key; sortDir = 'asc'; }
+          else if (sortDir === 'asc') { sortDir = 'desc'; }
+          else { sortKey = null; sortDir = 'asc'; }
+          renderTable();
+        };
+      });
     };
 
-    const updateCharts = async () => {
-      try {
-        const prodAgg = {};
-        const typeAgg = {};
-        for (const r of records) {
-          prodAgg[r.kod || r.name || ''] = (prodAgg[r.kod || r.name || ''] || 0) + 1;
-          typeAgg[r.tur || r.type || ''] = (typeAgg[r.tur || r.type || ''] || 0) + 1;
-        }
-        const prodPairs = Object.entries(prodAgg).sort((a,b)=> b[1]-a[1]).slice(0,10);
-        const prodLabels = prodPairs.map(p=>p[0]); const prodData = prodPairs.map(p=>p[1]);
-        const typePairs = Object.entries(typeAgg).sort((a,b)=> b[1]-a[1]).slice(0,10);
-        const typeLabels = typePairs.map(p=>p[0]); const typeData = typePairs.map(p=>p[1]);
-        const { renderChart } = await import('../ui/helpers.js');
-        renderChart(prodBar, { type:'bar', data:{ labels: prodLabels, datasets:[{ label:'Count', data: prodData, backgroundColor:'#60a5fa' }] }, options:{responsive:true, scales:{y:{beginAtZero:true}}} });
-        renderChart(typePie, { type:'pie', data:{ labels: typeLabels, datasets:[{ data: typeData, backgroundColor: typeLabels.map((_,i)=>['#60a5fa','#f472b6','#34d399','#f59e0b','#a78bfa'][i%5]) }] }, options:{responsive:true, plugins:{legend:{position:'right'}}} });
-      } catch(e){}
-    };
+  // charts intentionally removed; no-op
 
     setTimeout(() => {
       const csvBtn = topRow.querySelector('#export-csv');
@@ -113,9 +150,9 @@ export async function mount(container, { setHeader }) {
 
   pager.update(records.length, pageSize, currentPage);
   renderTable();
-  try { updateCharts(); } catch(e){}
-  select.addEventListener('change', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); try { updateCharts(); } catch(e){} });
-  if (searchInput) searchInput.addEventListener('input', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); try { updateCharts(); } catch(e){} });
+  // charts removed
+  select.addEventListener('change', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); });
+  if (searchInput) searchInput.addEventListener('input', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); });
   }
 
   await loadList();
