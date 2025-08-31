@@ -1,20 +1,54 @@
 import { showToast, createRowCountSelector, createPaginationControls, exportToCSV, exportToXLSX, printTable } from '../ui/helpers.js';
 
 export async function mount(container, { setHeader }) {
-  setHeader('Üretim', 'Rapor görünümü (sadece liste)');
+  setHeader('Üretim', 'Rapor görünümü (sekmeler)');
   container.innerHTML = `
     <div class="mt-2">
-      <h3 class="text-xl font-semibold mb-2">Üretim Kayıtları</h3>
-      <div id="uretim-list-placeholder"></div>
+  <div class="flex items-center justify-between">
+  </div>
+
+      <div class="tabs flex gap-2 mb-3">
+        <button data-tab="tab-list" class="tab-btn px-3 py-1 bg-neutral-800 rounded text-sm">Kayıtlar</button>
+        <button data-tab="tab-daily" class="tab-btn px-3 py-1 bg-neutral-700/40 rounded text-sm">Günlük Üretim Raporu</button>
+      </div>
+
+      <div id="tab-list" class="tab-content">
+        <div class="mb-2"><h4 class="text-sm font-medium">Üretim Kayıtları</h4></div>
+        <div id="uretim-list-placeholder"></div>
+      </div>
+
+      <div id="tab-daily" class="tab-content hidden">
+        <div class="mb-2"><h4 class="text-sm font-medium">Günlük Üretim Raporu</h4></div>
+        <div id="uretim-daily-placeholder"></div>
+      </div>
     </div>
   `;
 
   const listPlaceholder = container.querySelector('#uretim-list-placeholder');
-  // charts summary area (insert above the list) - only top-products bar
-  const chartsWrap = document.createElement('div'); chartsWrap.className = 'mb-4 grid grid-cols-1 gap-4';
-  const barWrap = document.createElement('div'); barWrap.className = 'bg-neutral-800 p-3 rounded'; barWrap.innerHTML = '<h4 class="text-sm mb-2">Top Ürünler</h4>';
-  listPlaceholder.parentNode.insertBefore(chartsWrap, listPlaceholder);
-  chartsWrap.appendChild(barWrap);
+  const dailyPlaceholder = container.querySelector('#uretim-daily-placeholder');
+  const tabButtons = Array.from(container.querySelectorAll('.tab-btn'));
+
+  function showTab(id) {
+    container.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+    const active = container.querySelector('#' + id);
+    if (active) active.classList.remove('hidden');
+    tabButtons.forEach(b => {
+      const isActive = b.dataset.tab === id;
+      b.classList.toggle('bg-neutral-800', isActive);
+      // add a white border to the active tab
+      if (isActive) {
+        b.classList.add('border', 'border-white');
+      } else {
+        b.classList.remove('border', 'border-white');
+      }
+    });
+  }
+  tabButtons.forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
+  showTab('tab-list');
+    const chartsWrap = document.createElement('div'); chartsWrap.className = 'mb-4 grid grid-cols-1 gap-4';
+    const barWrap = document.createElement('div'); barWrap.className = 'bg-neutral-800 p-3 rounded'; barWrap.innerHTML = '<h4 class="text-sm mb-2">Top Ürünler</h4>';
+    listPlaceholder.parentNode.insertBefore(chartsWrap, listPlaceholder);
+    chartsWrap.appendChild(barWrap);
 
   async function loadList() {
     const res = await window.electronAPI.listUretim();
@@ -44,6 +78,65 @@ export async function mount(container, { setHeader }) {
     const pager = createPaginationControls(records.length, pageSize, currentPage, (p) => { currentPage = p; renderTable(); });
     listPlaceholder.appendChild(pager);
     const debugInfo = document.createElement('div'); debugInfo.className = 'text-sm text-neutral-400 mt-1'; listPlaceholder.appendChild(debugInfo);
+
+    // prepare daily tab UI
+    if (dailyPlaceholder) {
+      dailyPlaceholder.innerHTML = '';
+      const dailyControls = document.createElement('div');
+      dailyControls.className = 'flex items-center gap-2 mb-2';
+      const todayStr = new Date().toISOString().slice(0,10);
+      dailyControls.innerHTML = `
+        <input id="daily-date" type="date" value="${todayStr}" class="px-2 py-1 rounded bg-neutral-800 text-neutral-200" />
+        <button id="daily-show" class="px-3 py-1 bg-neutral-800 rounded">Göster</button>
+        <button id="daily-export" class="px-3 py-1 bg-neutral-800 rounded">CSV</button>
+      `;
+      dailyPlaceholder.appendChild(dailyControls);
+      const dailyResultWrap = document.createElement('div'); dailyResultWrap.id = 'daily-result'; dailyPlaceholder.appendChild(dailyResultWrap);
+
+      function renderDaily(dateStr) {
+        const filtered = records.filter(r => (r.tarih || '').slice(0,10) === dateStr);
+        const agg = {};
+        for (const r of filtered) {
+          const key = r.urunKodu || 'UNKNOWN';
+          agg[key] = (agg[key] || 0) + (Number(r.uretimAdedi) || 0);
+        }
+        const rows = Object.entries(agg).sort((a,b)=> b[1]-a[1]);
+        if (rows.length === 0) {
+          dailyResultWrap.innerHTML = '<div class="text-neutral-400">Seçilen gün için kayıt bulunamadı.</div>';
+          return;
+        }
+        const tableHtml = `
+          <div class="overflow-auto bg-neutral-800 p-2 rounded">
+            <table class="w-full text-left text-sm">
+              <thead class="text-neutral-400"><tr><th class="p-2">Ürün Kodu</th><th class="p-2">Toplam Üretim</th></tr></thead>
+              <tbody>
+                ${rows.map(r => `<tr class="border-t border-neutral-700"><td class="p-2">${r[0]}</td><td class="p-2">${r[1]}</td></tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+        dailyResultWrap.innerHTML = tableHtml;
+      }
+
+      dailyPlaceholder.querySelector('#daily-show').addEventListener('click', () => {
+        const d = dailyPlaceholder.querySelector('#daily-date').value;
+        renderDaily(d);
+      });
+      dailyPlaceholder.querySelector('#daily-export').addEventListener('click', () => {
+        const d = dailyPlaceholder.querySelector('#daily-date').value;
+        const filtered = records.filter(r => (r.tarih || '').slice(0,10) === d);
+        if (!filtered.length) { showToast('Seçilen gün için veri yok'); return; }
+        // export aggregated CSV
+        const agg = {};
+        for (const r of filtered) { const k = r.urunKodu || 'UNKNOWN'; agg[k] = (agg[k] || 0) + (Number(r.uretimAdedi) || 0); }
+        const arr = Object.entries(agg).map(([k,v]) => ({ urunKodu: k, toplam: v }));
+        try { exportToCSV(`günluk-uretim-${d}.csv`, arr, [{ key:'urunKodu', label:'Ürün Kodu' }, { key:'toplam', label:'Toplam Üretim' }]); } catch (e) { showToast('CSV export failed'); }
+      });
+
+      // render default
+      const defDate = dailyPlaceholder.querySelector('#daily-date').value;
+      renderDaily(defDate);
+    }
 
   const renderTable = () => {
       const q = (searchInput && searchInput.value || '').trim().toLowerCase();
