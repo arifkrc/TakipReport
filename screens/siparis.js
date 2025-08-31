@@ -1,222 +1,61 @@
-import { createRowCountSelector, createPaginationControls } from '../ui/helpers.js';
-let _cleanup = null;
+import { createRowCountSelector, createPaginationControls, exportToCSV, exportToXLSX, printTable } from '../ui/helpers.js';
 
 export async function mount(container, { setHeader }) {
-  setHeader('Siparişler', 'Sipariş import ve listesi');
-
+  setHeader('Siparişler', 'Rapor görünümü (sadece liste)');
   container.innerHTML = `
     <div class="mt-2">
       <h3 class="text-xl font-semibold mb-2">Siparişler</h3>
-
-      <div class="mb-4 flex items-center gap-3">
-        <button id="import-files" class="px-4 py-2 rounded bg-green-600 hover:bg-green-500">Dosya İçe Aktar (CSV/XLSX)</button>
-      </div>
-
-      <div id="siparis-import-preview" class="mb-4"></div>
-
-      <form id="siparis-form" class="space-y-4 mb-4">
-        <div class="grid grid-cols-3 gap-4">
-          <label class="flex flex-col text-sm">Ürün Kodu<input name="urunKodu" type="text" class="mt-1 px-3 py-2 bg-neutral-800 rounded text-neutral-100" /></label>
-          <label class="flex flex-col text-sm">Açıklama<input name="aciklama" type="text" class="mt-1 px-3 py-2 bg-neutral-800 rounded text-neutral-100" /></label>
-          <label class="flex flex-col text-sm">Seçenekler<input name="secenekler" type="text" class="mt-1 px-3 py-2 bg-neutral-800 rounded text-neutral-100" /></label>
-        </div>
-        <div class="grid grid-cols-3 gap-4">
-          <label class="flex flex-col text-sm">Belge No<input name="belgeNo" type="text" class="mt-1 px-3 py-2 bg-neutral-800 rounded text-neutral-100" /></label>
-          <label class="flex flex-col text-sm">Müşteri Adı<input name="musteriAdi" type="text" class="mt-1 px-3 py-2 bg-neutral-800 rounded text-neutral-100" /></label>
-          <label class="flex flex-col text-sm">Sipariş Adet<input name="siparisAdet" type="number" min="0" class="mt-1 px-3 py-2 bg-neutral-800 rounded text-neutral-100" /></label>
-        </div>
-        <div class="grid grid-cols-3 gap-4">
-          <label class="flex flex-col text-sm">Devir Sayısı<input name="devirSayisi" type="number" min="0" class="mt-1 px-3 py-2 bg-neutral-800 rounded text-neutral-100" /></label>
-          <div></div>
-          <div></div>
-        </div>
-        <div class="flex items-center gap-3">
-          <button type="submit" class="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500">Ekle</button>
-          <button type="button" id="siparis-reset" class="px-4 py-2 rounded bg-neutral-700 hover:bg-neutral-600">Temizle</button>
-        </div>
-      </form>
-
       <div id="siparis-list-placeholder"></div>
     </div>
   `;
 
-  const importBtn = container.querySelector('#import-files');
-  const importPreview = container.querySelector('#siparis-import-preview');
-  const form = container.querySelector('#siparis-form');
-  const resetBtn = container.querySelector('#siparis-reset');
-  const listPlaceholder = container.querySelector('#siparis-list-placeholder');
-
-  let lastPreview = { rows: [], filePaths: [] };
-
-  function renderPreview(rows) {
-    if (!rows || rows.length === 0) {
-      importPreview.innerHTML = '<div class="text-neutral-400">Önizlenecek veri yok</div>';
-      return;
-    }
-
-  // create selector + search for preview
-  const { wrapper: selectorWrap, select } = createRowCountSelector(20);
-  const searchWrap = document.createElement('div');
-  searchWrap.className = 'ml-2';
-  searchWrap.innerHTML = `<input type="search" placeholder="Önizlemede ara..." class="px-3 py-2 rounded bg-neutral-800 text-neutral-200" />`;
-  const searchInput = searchWrap.querySelector('input');
-
-  importPreview.innerHTML = '';
-  const topRow = document.createElement('div'); topRow.className = 'flex items-center gap-2'; topRow.appendChild(selectorWrap); topRow.appendChild(searchWrap);
-  importPreview.appendChild(topRow);
-
-  let previewPageSize = (select.value === 'all') ? rows.length || 1 : Number(select.value || 20);
-  let previewPage = 1;
-  const previewPager = createPaginationControls(rows.length, previewPageSize, previewPage, (p) => { previewPage = p; renderTable(); });
-  importPreview.appendChild(previewPager);
-  const previewDebug = document.createElement('div'); previewDebug.className = 'text-sm text-neutral-400 mt-1'; importPreview.appendChild(previewDebug);
-
-  const renderTable = () => {
-  const q = (searchInput && searchInput.value || '').trim().toLowerCase();
-  const filtered = q ? rows.filter(r => {
-    return ['urunKodu','aciklama','secenekler','belgeNo','musteriAdi'].some(k => String(r[k] || '').toLowerCase().includes(q));
-  }) : rows;
-  const limit = select.value;
-  const pageSizeLocal = (limit === 'all') ? filtered.length || 1 : Number(limit || 20);
-  const start = (previewPage - 1) * pageSizeLocal;
-  const slice = (limit === 'all') ? filtered : filtered.slice(start, start + pageSizeLocal);
-  try { previewPager.update(filtered.length, pageSizeLocal, previewPage); } catch(e) {}
-  try { previewDebug.textContent = `Toplam Önizleme: ${filtered.length}, SayfaBoyutu: ${select.value}, Sayfa: ${previewPage}`; } catch(e) {}
-  const html = `
-      <div class="mb-2">
-        <h4 class="text-lg font-medium">İçe Aktarılacak Satırlar</h4>
-        <div class="overflow-auto bg-neutral-800 p-2 rounded">
-          <table class="w-full text-left text-sm">
-            <thead class="text-neutral-400"><tr>
-              <th class="p-2">Ürün Kodu</th>
-              <th class="p-2">Açıklama</th>
-              <th class="p-2">Seçenekler</th>
-              <th class="p-2">Belge no</th>
-              <th class="p-2">Müşteri</th>
-              <th class="p-2">Sipariş Adet</th>
-            </tr></thead>
-            <tbody>
-              ${slice.map(r => `
-                <tr class="border-t border-neutral-700">
-                  <td class="p-2">${r.urunKodu || ''}</td>
-                  <td class="p-2">${r.aciklama || ''}</td>
-                  <td class="p-2">${r.secenekler || ''}</td>
-                  <td class="p-2">${r.belgeNo || ''}</td>
-                  <td class="p-2">${r.musteriAdi || ''}</td>
-                  <td class="p-2">${r.siparisAdet || ''}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        <div class="mt-2 flex gap-2">
-          <button id="import-confirm" class="px-3 py-2 bg-green-600 rounded">Tümünü İçe Aktar</button>
-          <button id="import-cancel" class="px-3 py-2 bg-neutral-700 rounded">İptal</button>
-        </div>
-      </div>
-    `;
-  const existingTable = importPreview.querySelector('.mb-2');
-  if (existingTable) existingTable.outerHTML = html; else importPreview.insertAdjacentHTML('beforeend', html);
-  try { previewPager.update(filtered.length, pageSizeLocal, previewPage); } catch(e) {}
-
-  const conf = importPreview.querySelector('#import-confirm');
-      const canc = importPreview.querySelector('#import-cancel');
-      conf.addEventListener('click', async () => {
-        conf.disabled = true; conf.textContent = 'İçe Aktarılıyor...';
-        try {
-          const res = await window.electronAPI.importSiparis(lastPreview.filePaths);
-          if (res && res.ok) {
-            await loadList();
-            importPreview.innerHTML = '<div class="text-green-400">İçe aktarma tamamlandı</div>';
-            lastPreview = { rows: [], filePaths: [] };
-          } else {
-            console.error('import failed', res);
-          }
-        } catch (err) { console.error(err); }
-        finally { conf.disabled = false; conf.textContent = 'Tümünü İçe Aktar'; }
-      });
-  canc.addEventListener('click', () => { importPreview.innerHTML = ''; lastPreview = { rows: [], filePaths: [] }; });
-  if (searchInput) searchInput.addEventListener('input', () => { previewPage = 1; renderTable(); });
-    };
-
-  // initial render
-  renderTable();
-  select.addEventListener('change', () => { previewPage = 1; renderTable(); });
-  }
-
-  async function importHandler() {
-    importBtn.disabled = true; importBtn.textContent = 'Önizleniyor...';
-    try {
-      const res = await window.electronAPI.previewSiparis();
-      if (res && res.ok) {
-        lastPreview = { rows: res.rows || [], filePaths: res.filePaths || [] };
-        renderPreview(lastPreview.rows);
-      } else { console.error('preview failed', res); }
-    } catch (err) { console.error(err); }
-    finally { importBtn.disabled = false; importBtn.textContent = 'Dosya İçe Aktar (CSV/XLSX)'; }
-  }
-
-  async function submitHandler(e) {
-    e.preventDefault();
-    const data = Object.fromEntries(new FormData(form).entries());
-    data.siparisAdet = Number(data.siparisAdet) || 0;
-    data.devirSayisi = Number(data.devirSayisi) || 0;
-    const submitBtn = form.querySelector('button[type="submit"]');
-    submitBtn.disabled = true; submitBtn.textContent = 'Ekleniyor...';
-    try {
-      const res = await window.electronAPI.saveSiparis(data);
-      if (res && res.ok) { form.reset(); await loadList(); }
-      else console.error('save siparis failed', res);
-    } catch (err) { console.error(err); }
-    finally { submitBtn.disabled = false; submitBtn.textContent = 'Ekle'; }
-  }
-
-  function resetHandler() { form.reset(); }
-
-  importBtn.addEventListener('click', importHandler);
-  form.addEventListener('submit', submitHandler);
-  resetBtn.addEventListener('click', resetHandler);
+  const placeholder = container.querySelector('#siparis-list-placeholder');
+  // charts summary area
+  const chartsWrap = document.createElement('div'); chartsWrap.className = 'mb-4 grid grid-cols-2 gap-4';
+  const custBar = document.createElement('div'); custBar.className = 'bg-neutral-800 p-3 rounded'; custBar.innerHTML = '<h4 class="text-sm mb-2">Top Müşteriler</h4>';
+  const prodPie = document.createElement('div'); prodPie.className = 'bg-neutral-800 p-3 rounded'; prodPie.innerHTML = '<h4 class="text-sm mb-2">Ürün Dağılımı</h4>';
+  placeholder.parentNode.insertBefore(chartsWrap, placeholder);
+  chartsWrap.appendChild(custBar); chartsWrap.appendChild(prodPie);
 
   async function loadList() {
     const res = await window.electronAPI.listSiparis();
-    if (!res || !res.ok) { listPlaceholder.innerHTML = '<div class="text-rose-400">Liste yüklenemedi</div>'; return; }
+    if (!res || !res.ok) { placeholder.innerHTML = '<div class="text-rose-400">Liste yüklenemedi</div>'; return; }
     const records = res.records || [];
 
-  const { wrapper: selectorWrap, select } = createRowCountSelector(20);
-  const searchWrap = document.createElement('div');
-  searchWrap.className = 'ml-2';
-  searchWrap.innerHTML = `<input type="search" placeholder="Tabloda ara..." class="px-3 py-2 rounded bg-neutral-800 text-neutral-200" />`;
-  const searchInput = searchWrap.querySelector('input');
+    const { wrapper: selectorWrap, select } = createRowCountSelector(20);
+    const searchWrap = document.createElement('div');
+    searchWrap.className = 'ml-2';
+    searchWrap.innerHTML = `<input type="search" placeholder="Tabloda ara..." class="px-3 py-2 rounded bg-neutral-800 text-neutral-200" />`;
+    const searchInput = searchWrap.querySelector('input');
 
-  listPlaceholder.innerHTML = '';
+    placeholder.innerHTML = '';
   const topRow = document.createElement('div'); topRow.className = 'flex items-center gap-2'; topRow.appendChild(selectorWrap); topRow.appendChild(searchWrap);
-  listPlaceholder.appendChild(topRow);
+  const tools = document.createElement('div'); tools.className = 'ml-auto flex items-center gap-2';
+  tools.innerHTML = `<button id="export-csv" class="px-3 py-1 bg-neutral-800 rounded">CSV</button><button id="export-xlsx" class="px-3 py-1 bg-neutral-800 rounded">XLSX</button><button id="print-table" class="px-3 py-1 bg-neutral-800 rounded">Yazdır</button>`;
+  topRow.appendChild(tools);
+  placeholder.appendChild(topRow);
 
-  let pageSize = (select.value === 'all') ? records.length || 1 : Number(select.value || 20);
-  let currentPage = 1;
-  const pager = createPaginationControls(records.length, pageSize, currentPage, (p) => { currentPage = p; renderTable(); });
-  listPlaceholder.appendChild(pager);
-  const listDebug = document.createElement('div'); listDebug.className = 'text-sm text-neutral-400 mt-1'; listPlaceholder.appendChild(listDebug);
+    let pageSize = (select.value === 'all') ? records.length || 1 : Number(select.value || 20);
+    let currentPage = 1;
+    const pager = createPaginationControls(records.length, pageSize, currentPage, (p) => { currentPage = p; renderTable(); });
+    placeholder.appendChild(pager);
+    const debugInfo = document.createElement('div'); debugInfo.className = 'text-sm text-neutral-400 mt-1'; placeholder.appendChild(debugInfo);
 
     const renderTable = () => {
+      const limit = select.value;
+      pageSize = (limit === 'all') ? records.length || 1 : Number(limit || 20);
       const q = (searchInput && searchInput.value || '').trim().toLowerCase();
       const filtered = q ? records.filter(r => {
         return ['urunKodu','aciklama','secenekler','belgeNo','musteriAdi'].some(k => String(r[k] || '').toLowerCase().includes(q));
       }) : records;
-      const limit = select.value;
-      pageSize = (limit === 'all') ? filtered.length || 1 : Number(limit || 20);
-  try { pager.update(filtered.length, pageSize, currentPage); } catch(e) {}
-  try { listDebug.textContent = `Toplam: ${filtered.length}, SayfaBoyutu: ${pageSize}, Sayfa: ${currentPage}`; } catch(e) {}
       const start = (currentPage - 1) * pageSize;
       const slice = (limit === 'all') ? filtered : filtered.slice(start, start + pageSize);
       const html = `
       <div class="mt-4">
-        <h4 class="text-lg font-medium mb-2">Siparişler</h4>
         <div class="overflow-auto bg-neutral-800 p-2 rounded">
           <table class="w-full text-left text-sm">
             <thead class="text-neutral-400">
               <tr>
-                <th class="p-2"> </th>
                 <th class="p-2">Ürün Kodu</th>
                 <th class="p-2">Açıklama</th>
                 <th class="p-2">Seçenekler</th>
@@ -230,7 +69,6 @@ export async function mount(container, { setHeader }) {
             <tbody>
               ${slice.map(r => `
                 <tr class="border-t border-neutral-700">
-                  <td class="p-2"><button data-savedat="${r.savedAt || ''}" class="delete-btn px-2 py-1 rounded bg-rose-600 hover:bg-rose-500">✖</button></td>
                   <td class="p-2">${r.urunKodu || ''}</td>
                   <td class="p-2">${r.aciklama || ''}</td>
                   <td class="p-2">${r.secenekler || ''}</td>
@@ -246,32 +84,44 @@ export async function mount(container, { setHeader }) {
         </div>
       </div>
     `;
-  const existingTable = listPlaceholder.querySelector('.mt-4');
-  if (existingTable) existingTable.outerHTML = html; else listPlaceholder.insertAdjacentHTML('beforeend', html);
-  try { pager.update(records.length, pageSize, currentPage); } catch(e) {}
-  listPlaceholder.querySelectorAll('.delete-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const savedAt = btn.getAttribute('data-savedat'); if (!savedAt) return; btn.disabled = true;
-      const res = await window.electronAPI.deleteSiparis(savedAt);
-      if (res && res.ok && res.removed) { await loadList(); } else { btn.disabled = false; }
-    });
-  });
+  const existingTable = placeholder.querySelector('.mt-4');
+  if (existingTable) existingTable.outerHTML = html; else placeholder.insertAdjacentHTML('beforeend', html);
+  };
+    const updateCharts = async () => {
+      try {
+        const custAgg = {};
+        const prodAgg = {};
+        for (const r of records) {
+          custAgg[r.musteri || r.customer || ''] = (custAgg[r.musteri || r.customer || ''] || 0) + (Number(r.adet) || 1);
+          prodAgg[r.urun || r.kod || r.product || ''] = (prodAgg[r.urun || r.kod || r.product || ''] || 0) + (Number(r.adet) || 1);
+        }
+        const custPairs = Object.entries(custAgg).sort((a,b)=> b[1]-a[1]).slice(0,10);
+        const custLabels = custPairs.map(p=>p[0]); const custData = custPairs.map(p=>p[1]);
+        const prodPairs = Object.entries(prodAgg).sort((a,b)=> b[1]-a[1]).slice(0,10);
+        const prodLabels = prodPairs.map(p=>p[0]); const prodData = prodPairs.map(p=>p[1]);
+        const { renderChart } = await import('../ui/helpers.js');
+        renderChart(custBar, { type:'bar', data:{ labels: custLabels, datasets:[{ label:'Adet', data: custData, backgroundColor:'#60a5fa' }] }, options:{responsive:true, scales:{y:{beginAtZero:true}}} });
+        renderChart(prodPie, { type:'pie', data:{ labels: prodLabels, datasets:[{ data: prodData, backgroundColor: prodLabels.map((_,i)=>['#60a5fa','#f472b6','#34d399','#f59e0b','#a78bfa'][i%5]) }] }, options:{responsive:true, plugins:{legend:{position:'right'}}} });
+      } catch(e){}
     };
 
-  renderTable(select.value);
-  select.addEventListener('change', () => { currentPage = 1; renderTable(select.value); });
-  if (searchInput) searchInput.addEventListener('input', () => { currentPage = 1; renderTable(select.value); });
+    setTimeout(() => {
+      const csvBtn = topRow.querySelector('#export-csv');
+      const xlsxBtn = topRow.querySelector('#export-xlsx');
+      const printBtn = topRow.querySelector('#print-table');
+      csvBtn && csvBtn.addEventListener('click', () => { try { exportToCSV('siparis-export.csv', records); } catch(e){} });
+      xlsxBtn && xlsxBtn.addEventListener('click', async () => { try { await exportToXLSX('siparis-export.xlsx', records); } catch(e){} });
+      printBtn && printBtn.addEventListener('click', () => { try { printTable('Siparişler', records); } catch(e){} });
+    }, 80);
+
+  pager.update(records.length, pageSize, currentPage);
+  renderTable();
+  try { updateCharts(); } catch(e){}
+    select.addEventListener('change', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); });
+  if (searchInput) searchInput.addEventListener('input', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); try { updateCharts(); } catch(e){} });
   }
 
   await loadList();
-
-  _cleanup = () => {
-    try { importBtn.removeEventListener('click', importHandler); } catch(e){}
-    try { form.removeEventListener('submit', submitHandler); } catch(e){}
-    try { resetBtn.removeEventListener('click', resetHandler); } catch(e){}
-    try { container.innerHTML = ''; } catch(e){}
-    _cleanup = null;
-  };
 }
 
-export async function unmount(container) { if (_cleanup) _cleanup(); }
+export async function unmount(container) { try { container.innerHTML = ''; } catch(e) {} }

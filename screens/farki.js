@@ -1,4 +1,4 @@
-import { createRowCountSelector, showToast, createPaginationControls } from '../ui/helpers.js';
+import { createRowCountSelector, showToast, createPaginationControls, exportToCSV, exportToXLSX, printTable } from '../ui/helpers.js';
 
 let _cleanup = null;
 
@@ -14,6 +14,12 @@ export async function mount(container, { setHeader }) {
 
   const controls = container.querySelector('#farki-controls');
   const tableWrap = container.querySelector('#farki-table');
+  // summary charts container
+  const chartsWrap = document.createElement('div'); chartsWrap.className = 'mb-4 grid grid-cols-2 gap-4';
+  const pieWrap = document.createElement('div'); pieWrap.className = 'bg-neutral-800 p-3 rounded'; pieWrap.innerHTML = '<h4 class="text-sm mb-2">Fark Dağılımı (Top 10)</h4>';
+  const barWrap = document.createElement('div'); barWrap.className = 'bg-neutral-800 p-3 rounded'; barWrap.innerHTML = '<h4 class="text-sm mb-2">Top Ürünler (Fark)</h4>';
+  chartsWrap.appendChild(pieWrap); chartsWrap.appendChild(barWrap);
+  controls.parentNode.insertBefore(chartsWrap, controls.nextSibling);
 
   const { wrapper: selectorWrap, select } = createRowCountSelector(20);
   const searchWrap = document.createElement('div');
@@ -21,6 +27,9 @@ export async function mount(container, { setHeader }) {
   searchWrap.innerHTML = `<input type="search" placeholder="Tabloda ara..." class="px-3 py-2 rounded bg-neutral-800 text-neutral-200" />`;
   const searchInput = searchWrap.querySelector('input');
   const topRow = document.createElement('div'); topRow.className = 'flex items-center gap-2'; topRow.appendChild(selectorWrap); topRow.appendChild(searchWrap);
+  const tools = document.createElement('div'); tools.className = 'ml-auto flex items-center gap-2';
+  tools.innerHTML = `<button id="export-csv" class="px-3 py-1 bg-neutral-800 rounded">CSV</button><button id="export-xlsx" class="px-3 py-1 bg-neutral-800 rounded">XLSX</button><button id="print-table" class="px-3 py-1 bg-neutral-800 rounded">Yazdır</button>`;
+  topRow.appendChild(tools);
   controls.appendChild(topRow);
 
   let pageSize = (select.value === 'all') ? 1 : Number(select.value || 20);
@@ -60,6 +69,17 @@ export async function mount(container, { setHeader }) {
         const pAdet = aggP[k] || 0;
         return { urunKodu, tarih, uAdet, pAdet, fark: uAdet - pAdet };
       }).sort((a,b) => b.fark - a.fark);
+
+      // prepare simple charts: top 10 absolute differences
+      try {
+        const sortedByAbs = rows.slice().sort((a,b)=> Math.abs(b.fark) - Math.abs(a.fark)).slice(0,10);
+        const labels = sortedByAbs.map(r=> r.urunKodu + (r.tarih ? ' '+r.tarih : ''));
+        const data = sortedByAbs.map(r=> r.fark);
+        // lazy import helper
+        const { renderChart } = await import('../ui/helpers.js');
+        renderChart(pieWrap, { type: 'pie', data: { labels, datasets: [{ data, backgroundColor: labels.map((_,i)=>['#60a5fa','#f472b6','#34d399','#f59e0b','#a78bfa'][i%5]) }] }, options: { responsive:true, plugins:{legend:{position:'right'}} } });
+        renderChart(barWrap, { type: 'bar', data: { labels, datasets: [{ label: 'Fark', data, backgroundColor: '#60a5fa' }] }, options: { responsive:true, scales:{y:{beginAtZero:true}} } });
+      } catch (e) { /* non-critical */ }
 
   const q = (searchInput && searchInput.value || '').trim().toLowerCase();
   const filtered = q ? rows.filter(r => {
@@ -101,6 +121,15 @@ export async function mount(container, { setHeader }) {
 
     tableWrap.innerHTML = html;
     pager.update(rows.length, pageSize, currentPage);
+    // wire export/print for computed rows
+    setTimeout(() => {
+      const csvBtn = topRow.querySelector('#export-csv');
+      const xlsxBtn = topRow.querySelector('#export-xlsx');
+      const printBtn = topRow.querySelector('#print-table');
+      csvBtn && csvBtn.addEventListener('click', () => { try { exportToCSV('farki-export.csv', rows, [ { key: 'urunKodu', label: 'Ürün Kodu' }, { key: 'tarih', label: 'Tarih' }, { key: 'uAdet', label: 'Üretim' }, { key: 'pAdet', label: 'Paketleme' }, { key: 'fark', label: 'Fark' } ]); } catch(e){} });
+      xlsxBtn && xlsxBtn.addEventListener('click', async () => { try { await exportToXLSX('farki-export.xlsx', rows, [ { key: 'urunKodu', label: 'Ürün Kodu' }, { key: 'tarih', label: 'Tarih' }, { key: 'uAdet', label: 'Üretim' }, { key: 'pAdet', label: 'Paketleme' }, { key: 'fark', label: 'Fark' } ]); } catch(e){} });
+      printBtn && printBtn.addEventListener('click', () => { try { printTable('Üretim - Paket Farkı', rows, [ { key: 'urunKodu', label: 'Ürün Kodu' }, { key: 'tarih', label: 'Tarih' }, { key: 'uAdet', label: 'Üretim' }, { key: 'pAdet', label: 'Paketleme' }, { key: 'fark', label: 'Fark' } ]); } catch(e){} });
+    }, 60);
     } catch (err) {
       tableWrap.innerHTML = '<div class="text-rose-400">Liste oluşturulurken hata</div>';
       showToast('Fark listesi yüklenirken hata: ' + String(err), 'error');

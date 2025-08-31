@@ -127,3 +127,99 @@ export function createPaginationControls(totalItems = 0, pageSize = 20, currentP
   wrapper.update(totalItems, pageSize, currentPage);
   return wrapper;
 }
+
+// Export utilities: CSV, XLSX (uses SheetJS when available), and print
+export function exportToCSV(filename = 'export.csv', rows = [], columns = []) {
+  // columns: array of { key, label }
+  const cols = (columns && columns.length) ? columns : (rows[0] ? Object.keys(rows[0]).map(k => ({ key: k, label: k })) : []);
+  const header = cols.map(c => `"${String(c.label).replace(/"/g,'""')}"`).join(',');
+  const lines = rows.map(r => cols.map(c => {
+    const v = r[c.key] == null ? '' : String(r[c.key]);
+    return `"${v.replace(/"/g,'""')}"`;
+  }).join(','));
+  const csv = [header].concat(lines).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function exportToXLSX(filename = 'export.xlsx', rows = [], columns = []) {
+  // Try to use SheetJS if available; otherwise fall back to CSV with a warning
+  const XLSX = window.XLSX || (typeof require === 'function' ? (() => { try { return require('xlsx'); } catch(e){ return null; } })() : null);
+  if (!XLSX) {
+    exportToCSV(filename.replace(/\.xlsx?$/i, '.csv'), rows, columns);
+    return;
+  }
+  const cols = (columns && columns.length) ? columns : (rows[0] ? Object.keys(rows[0]).map(k => ({ key: k, label: k })) : []);
+  const data = [cols.map(c => c.label)];
+  for (const r of rows) data.push(cols.map(c => r[c.key] == null ? '' : r[c.key]));
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+
+export function printTable(title = '', rows = [], columns = []) {
+  const cols = (columns && columns.length) ? columns : (rows[0] ? Object.keys(rows[0]).map(k => ({ key: k, label: k })) : []);
+  const html = `
+    <html><head><title>${String(title || '')}</title><style>body{font-family:Arial,Helvetica,sans-serif;color:#ddd;background:#111}table{width:100%;border-collapse:collapse}th,td{border:1px solid #444;padding:6px;text-align:left}th{background:#222}</style></head><body>
+      <h2 style="color:#fff">${String(title || '')}</h2>
+      <table>
+        <thead><tr>${cols.map(c=>`<th>${String(c.label)}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${String(r[c.key] == null ? '' : r[c.key]).replace(/</g,'&lt;')}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>
+    </body></html>
+  `;
+  const w = window.open('', '_blank');
+  if (!w) { alert('Açılan pencere engellendi. Lütfen pop-up engelleyiciyi devre dışı bırakın.'); return; }
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { w.print(); }, 200);
+}
+
+// Chart helper: loads Chart.js from CDN if not present and provides a render function
+export async function ensureChartJS() {
+  if (window.Chart) return window.Chart;
+  // try to use global (preloaded) or dynamic import
+  try {
+    // attempt to load via CDN
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
+      s.onload = () => res(); s.onerror = (e) => rej(e);
+      document.head.appendChild(s);
+    });
+    return window.Chart;
+  } catch (e) {
+    console.warn('Chart.js load failed', e);
+    return null;
+  }
+}
+
+export async function renderChart(container, config) {
+  const Chart = await ensureChartJS();
+  if (!Chart) {
+    container.innerHTML = '<div class="text-rose-400">Chart.js yüklenemedi</div>';
+    return null;
+  }
+  // clear container and add canvas
+  container.innerHTML = '';
+  const canvas = document.createElement('canvas');
+  container.appendChild(canvas);
+  const ctx = canvas.getContext('2d');
+  // dispose existing chart instance on the canvas
+  if (canvas._chartInstance) try { canvas._chartInstance.destroy(); } catch(e){}
+  const chart = new Chart(ctx, config);
+  canvas._chartInstance = chart;
+  return chart;
+}

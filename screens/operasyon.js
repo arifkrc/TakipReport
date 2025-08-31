@@ -1,84 +1,49 @@
-import { createRowCountSelector, createPaginationControls } from '../ui/helpers.js';
-let _cleanup = null;
+import { createRowCountSelector, createPaginationControls, exportToCSV, exportToXLSX, printTable } from '../ui/helpers.js';
 
 export async function mount(container, { setHeader }) {
-  setHeader('Operasyonlar', 'Operasyon tanımları');
-
+  setHeader('Operasyonlar', 'Rapor görünümü (sadece liste)');
   container.innerHTML = `
     <div class="mt-2">
-      <h3 class="text-xl font-semibold mb-2">Operasyon Ekle</h3>
-      <form id="operasyon-form" class="space-y-4">
-        <div class="grid grid-cols-3 gap-4">
-          <label class="flex flex-col text-sm">Operasyon Kodu<input name="operasyonKodu" type="text" class="mt-1 px-3 py-2 bg-neutral-800 rounded text-neutral-100" required /></label>
-          <label class="flex flex-col text-sm">Operasyon Adı<input name="operasyonAdi" type="text" class="mt-1 px-3 py-2 bg-neutral-800 rounded text-neutral-100" required /></label>
-          <label class="flex items-center gap-3 text-sm">Aktif<label class="switch"><input name="aktif" type="checkbox" checked class="mt-1"/></label></label>
-        </div>
-
-        <div class="flex items-center gap-3">
-          <button type="submit" class="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500">Kaydet</button>
-          <button type="button" id="operasyon-reset" class="px-4 py-2 rounded bg-neutral-700 hover:bg-neutral-600">Temizle</button>
-        </div>
-      </form>
-
+      <h3 class="text-xl font-semibold mb-2">Operasyonlar</h3>
       <div id="operasyon-list-placeholder"></div>
     </div>
   `;
 
-  const form = container.querySelector('#operasyon-form');
   const placeholder = container.querySelector('#operasyon-list-placeholder');
-
-  async function submitHandler(e) {
-    e.preventDefault();
-    const fd = new FormData(form);
-    const data = Object.fromEntries(fd.entries());
-    data.aktif = !!form.querySelector('[name="aktif"]').checked;
-
-    const submitBtn = form.querySelector('button[type="submit"]');
-    submitBtn.disabled = true; submitBtn.textContent = 'Kaydediliyor...';
-    try {
-      const res = await window.electronAPI.saveOperasyon(data);
-      if (res && res.ok) {
-        form.reset();
-        await loadList();
-      } else {
-        console.error('saveOperasyon failed', res);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally { submitBtn.disabled = false; submitBtn.textContent = 'Kaydet'; }
-  }
-
-  function resetHandler() { form.reset(); }
-
-  form.addEventListener('submit', submitHandler);
-  form.querySelector('#operasyon-reset').addEventListener('click', resetHandler);
+  // charts summary area
+  const chartsWrap = document.createElement('div'); chartsWrap.className = 'mb-4 grid grid-cols-2 gap-4';
+  const opBar = document.createElement('div'); opBar.className = 'bg-neutral-800 p-3 rounded'; opBar.innerHTML = '<h4 class="text-sm mb-2">Top İşlem Türleri</h4>';
+  const statusPie = document.createElement('div'); statusPie.className = 'bg-neutral-800 p-3 rounded'; statusPie.innerHTML = '<h4 class="text-sm mb-2">Durum Dağılımı</h4>';
+  placeholder.parentNode.insertBefore(chartsWrap, placeholder);
+  chartsWrap.appendChild(opBar); chartsWrap.appendChild(statusPie);
 
   async function loadList() {
     const res = await window.electronAPI.listOperasyon();
     if (!res || !res.ok) { placeholder.innerHTML = '<div class="text-rose-400">Liste yüklenemedi</div>'; return; }
     const records = res.records || [];
 
-  const { wrapper: selectorWrap, select } = createRowCountSelector(20);
-  const searchWrap = document.createElement('div');
-  searchWrap.className = 'ml-2';
-  searchWrap.innerHTML = `<input type="search" placeholder="Tabloda ara..." class="px-3 py-2 rounded bg-neutral-800 text-neutral-200" />`;
-  const searchInput = searchWrap.querySelector('input');
+    const { wrapper: selectorWrap, select } = createRowCountSelector(20);
+    const searchWrap = document.createElement('div');
+    searchWrap.className = 'ml-2';
+    searchWrap.innerHTML = `<input type="search" placeholder="Tabloda ara..." class="px-3 py-2 rounded bg-neutral-800 text-neutral-200" />`;
+    const searchInput = searchWrap.querySelector('input');
 
-  placeholder.innerHTML = '';
+    placeholder.innerHTML = '';
   const topRow = document.createElement('div'); topRow.className = 'flex items-center gap-2'; topRow.appendChild(selectorWrap); topRow.appendChild(searchWrap);
+  const tools = document.createElement('div'); tools.className = 'ml-auto flex items-center gap-2';
+  tools.innerHTML = `<button id="export-csv" class="px-3 py-1 bg-neutral-800 rounded">CSV</button><button id="export-xlsx" class="px-3 py-1 bg-neutral-800 rounded">XLSX</button><button id="print-table" class="px-3 py-1 bg-neutral-800 rounded">Yazdır</button>`;
+  topRow.appendChild(tools);
   placeholder.appendChild(topRow);
 
     let pageSize = (select.value === 'all') ? records.length || 1 : Number(select.value || 20);
     let currentPage = 1;
     const pager = createPaginationControls(records.length, pageSize, currentPage, (p) => { currentPage = p; renderTable(); });
-  placeholder.appendChild(pager);
-  const debugInfo = document.createElement('div'); debugInfo.className = 'text-sm text-neutral-400 mt-1'; placeholder.appendChild(debugInfo);
+    placeholder.appendChild(pager);
+    const debugInfo = document.createElement('div'); debugInfo.className = 'text-sm text-neutral-400 mt-1'; placeholder.appendChild(debugInfo);
 
-    const renderTable = () => {
+  const renderTable = () => {
       const limit = select.value;
-    pageSize = (limit === 'all') ? records.length || 1 : Number(limit || 20);
-  try { pager.update(records.length, pageSize, currentPage); } catch(e) {}
-  try { debugInfo.textContent = `Toplam: ${records.length}, SayfaBoyutu: ${pageSize}, Sayfa: ${currentPage}`; } catch(e) {}
+      pageSize = (limit === 'all') ? records.length || 1 : Number(limit || 20);
       const q = (searchInput && searchInput.value || '').trim().toLowerCase();
       const filtered = q ? records.filter(r => {
         return ['operasyonKodu','operasyonAdi'].some(k => String(r[k] || '').toLowerCase().includes(q));
@@ -87,12 +52,10 @@ export async function mount(container, { setHeader }) {
       const slice = (limit === 'all') ? filtered : filtered.slice(start, start + pageSize);
       const html = `
       <div class="mt-4">
-        <h4 class="text-lg font-medium mb-2">Tanımlı Operasyonlar</h4>
         <div class="overflow-auto bg-neutral-800 p-2 rounded">
           <table class="w-full text-left text-sm">
             <thead class="text-neutral-400">
               <tr>
-                <th class="p-2"> </th>
                 <th class="p-2">Operasyon Kodu</th>
                 <th class="p-2">Operasyon Adı</th>
                 <th class="p-2">Aktif</th>
@@ -102,7 +65,6 @@ export async function mount(container, { setHeader }) {
             <tbody>
               ${slice.map(r => `
                 <tr class="border-t border-neutral-700">
-                  <td class="p-2"><button data-savedat="${r.savedAt || ''}" class="delete-btn px-2 py-1 rounded bg-rose-600 hover:bg-rose-500">✖</button></td>
                   <td class="p-2">${r.operasyonKodu || ''}</td>
                   <td class="p-2">${r.operasyonAdi || ''}</td>
                   <td class="p-2">${r.aktif ? 'Evet' : 'Hayır'}</td>
@@ -114,32 +76,45 @@ export async function mount(container, { setHeader }) {
         </div>
       </div>
     `;
-  const existingTable = placeholder.querySelector('.mt-4');
-  if (existingTable) existingTable.outerHTML = html; else placeholder.insertAdjacentHTML('beforeend', html);
-  try { pager.update(records.length, pageSize, currentPage); } catch(e) {}
-  placeholder.querySelectorAll('.delete-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const savedAt = btn.getAttribute('data-savedat'); if (!savedAt) return; btn.disabled = true;
-      const res = await window.electronAPI.deleteOperasyon(savedAt);
-      if (res && res.ok && res.removed) { await loadList(); } else { btn.disabled = false; }
-    });
-  });
+      const existingTable = placeholder.querySelector('.mt-4');
+      if (existingTable) existingTable.outerHTML = html; else placeholder.insertAdjacentHTML('beforeend', html);
     };
+
+    const updateCharts = async () => {
+      try {
+        const opAgg = {};
+        const statAgg = {};
+        for (const r of records) {
+          opAgg[r.tur || r.islem || ''] = (opAgg[r.tur || r.islem || ''] || 0) + 1;
+          statAgg[r.durum || r.status || ''] = (statAgg[r.durum || r.status || ''] || 0) + 1;
+        }
+        const opPairs = Object.entries(opAgg).sort((a,b)=> b[1]-a[1]).slice(0,10);
+        const opLabels = opPairs.map(p=>p[0]); const opData = opPairs.map(p=>p[1]);
+        const statPairs = Object.entries(statAgg).sort((a,b)=> b[1]-a[1]).slice(0,10);
+        const statLabels = statPairs.map(p=>p[0]); const statData = statPairs.map(p=>p[1]);
+        const { renderChart } = await import('../ui/helpers.js');
+        renderChart(opBar, { type:'bar', data:{ labels: opLabels, datasets:[{ label:'Count', data: opData, backgroundColor:'#60a5fa' }] }, options:{responsive:true, scales:{y:{beginAtZero:true}}} });
+        renderChart(statusPie, { type:'pie', data:{ labels: statLabels, datasets:[{ data: statData, backgroundColor: statLabels.map((_,i)=>['#60a5fa','#f472b6','#34d399','#f59e0b','#a78bfa'][i%5]) }] }, options:{responsive:true, plugins:{legend:{position:'right'}}} });
+      } catch(e){}
+    };
+
+    setTimeout(() => {
+      const csvBtn = topRow.querySelector('#export-csv');
+      const xlsxBtn = topRow.querySelector('#export-xlsx');
+      const printBtn = topRow.querySelector('#print-table');
+      csvBtn && csvBtn.addEventListener('click', () => { try { exportToCSV('operasyon-export.csv', records); } catch(e){} });
+      xlsxBtn && xlsxBtn.addEventListener('click', async () => { try { await exportToXLSX('operasyon-export.xlsx', records); } catch(e){} });
+      printBtn && printBtn.addEventListener('click', () => { try { printTable('Operasyonlar', records); } catch(e){} });
+    }, 80);
 
   pager.update(records.length, pageSize, currentPage);
   renderTable();
-  select.addEventListener('change', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); });
-  if (searchInput) searchInput.addEventListener('input', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); });
+  try { updateCharts(); } catch(e){}
+  select.addEventListener('change', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); try { updateCharts(); } catch(e){} });
+  if (searchInput) searchInput.addEventListener('input', () => { currentPage = 1; pager.update(records.length, (select.value==='all'?records.length:Number(select.value)), currentPage); renderTable(); try { updateCharts(); } catch(e){} });
   }
 
   await loadList();
-
-  _cleanup = () => {
-    try { form.removeEventListener('submit', submitHandler); } catch(e){}
-    try { const resetBtn = form.querySelector('#operasyon-reset'); if (resetBtn) resetBtn.removeEventListener('click', resetHandler); } catch(e){}
-    try { container.innerHTML = ''; } catch(e){}
-    _cleanup = null;
-  };
 }
 
-export async function unmount(container) { if (_cleanup) _cleanup(); }
+export async function unmount(container) { try { container.innerHTML = ''; } catch(e) {} }
